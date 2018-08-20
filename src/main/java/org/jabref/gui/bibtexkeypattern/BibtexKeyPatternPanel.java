@@ -6,8 +6,10 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
@@ -38,8 +40,9 @@ public class BibtexKeyPatternPanel extends Pane {
 
     // one field for each type
     private final Map<String, TextField> textFields = new HashMap<>();
-    private final TextField[] textFieldArray = new TextField[19];
+    private TextField[] textFieldArray;
     private final BasePanel panel;
+    private final ScrollPane scrollPane = new ScrollPane();
     private final GridPane gridPane = new GridPane();
 
     public BibtexKeyPatternPanel(BasePanel panel) {
@@ -77,6 +80,7 @@ public class BibtexKeyPatternPanel extends Pane {
             mode = Globals.prefs.getDefaultBibDatabaseMode();
         }
 
+        textFieldArray = new TextField[EntryTypes.getAllValues(mode).size()];
         addExtraText(mode);
         int y = 0;
         for (EntryType type : EntryTypes.getAllValues(mode)) {
@@ -84,27 +88,15 @@ public class BibtexKeyPatternPanel extends Pane {
             y++;
         }
 
-        Button help1 = new Button("?");
-        help1.setOnAction(e->new HelpAction(Localization.lang("Help on key patterns"), HelpFile.BIBTEX_KEY_PATTERN).getHelpButton().doClick());
-        gridPane.add(help1, 1, 24);
 
-        Button btnDefaultAll1 = new Button(Localization.lang("Reset all"));
-        btnDefaultAll1.setFont(FontSize.smallFont);
-        btnDefaultAll1.setOnAction(e-> {
-            // reset all fields
-            for (TextField field : textFieldArray) {
-                field.setText("");
-            }
-            defaultPat.setText((String) Globals.prefs.defaults.get(JabRefPreferences.DEFAULT_BIBTEX_KEY_PATTERN));
-        });
-        gridPane.add(btnDefaultAll1, 3, 24);
     }
 
     private void addExtraText(BibDatabaseMode mode) {
-        Label []label = new Label[19];
-        Button []button = new Button[19];
+        int size = EntryTypes.getAllValues(mode).size();
+        Label[] label = new Label[size];
+        Button[] button = new Button[size];
         int i = 0;
-        for (i = 0; i <= 18; i++) {
+        for (i = 0; i < size; i++) {
             textFieldArray[i] = new TextField();
             button[i] = new Button("Default");
             button[i].setFont(new javafx.scene.text.Font(10));
@@ -115,12 +107,29 @@ public class BibtexKeyPatternPanel extends Pane {
             label[i] = new Label(type.getName());
             i ++;
         }
-        for (i = 0; i <= 18; i++) {
+        for (i = 0; i < size; i++) {
             label[i].setFont(FontSize.smallFont);
             gridPane.add(label[i], 1, i + 3);
             gridPane.add(textFieldArray[i], 3, i + 3);
             gridPane.add(button[i], 4, i + 3);
         }
+        Button help1 = new Button("?");
+        help1.setOnAction(e -> new HelpAction(Localization.lang("Help on key patterns"), HelpFile.BIBTEX_KEY_PATTERN).getHelpButton().doClick());
+        gridPane.add(help1, 1, i + 3);
+
+        Button btnDefaultAll1 = new Button(Localization.lang("Reset all"));
+        btnDefaultAll1.setFont(FontSize.smallFont);
+        btnDefaultAll1.setOnAction(e -> {
+            // reset all fields
+            for (TextField field : textFieldArray) {
+                field.setText("");
+            }
+            defaultPat.setText((String) Globals.prefs.defaults.get(JabRefPreferences.DEFAULT_BIBTEX_KEY_PATTERN));
+        });
+        gridPane.add(btnDefaultAll1, 3, i + 3);
+        scrollPane.setContent(gridPane);
+        scrollPane.setFitToWidth(true);
+
     }
 
     /**
@@ -166,7 +175,7 @@ public class BibtexKeyPatternPanel extends Pane {
             setValue(entry.getValue(), entry.getKey(), keyPattern);
         }
 
-        if (keyPattern.getDefaultValue() == null || keyPattern.getDefaultValue().isEmpty()) {
+        if ((keyPattern.getDefaultValue() == null) || keyPattern.getDefaultValue().isEmpty()) {
             defaultPat.setText("");
         } else {
             defaultPat.setText(keyPattern.getDefaultValue().get(0));
@@ -181,7 +190,7 @@ public class BibtexKeyPatternPanel extends Pane {
         }
     }
 
-    public GridPane getPanel() {
-        return gridPane;
+    public Node getPanel() {
+        return scrollPane;
     }
 }
