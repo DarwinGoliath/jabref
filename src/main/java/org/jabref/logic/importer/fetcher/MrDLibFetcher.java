@@ -49,12 +49,16 @@ public class MrDLibFetcher implements EntryBasedFetcher {
     public List<BibEntry> performSearch(BibEntry entry) throws FetcherException {
         Optional<String> title = entry.getLatexFreeField(FieldName.TITLE);
         if (title.isPresent()) {
+            LOGGER.info("About to make request to server for title: " + title.get());
             String response = makeServerRequest(title.get());
+            LOGGER.info("Response: \n" + response);
             MrDLibImporter importer = new MrDLibImporter();
             ParserResult parserResult = new ParserResult();
             try {
                 if (importer.isRecognizedFormat(response)) {
+                    LOGGER.info("Importing JSON doc.");
                     parserResult = importer.importDatabase(response);
+                    LOGGER.info("JSON doc imported.");
                 } else {
                     // For displaying An ErrorMessage
                     BibEntry errorBibEntry = new BibEntry();
@@ -104,11 +108,11 @@ public class MrDLibFetcher implements EntryBasedFetcher {
      */
     private String constructQuery(String queryWithTitle) {
         // The encoding does not work for / so we convert them by our own
-        queryWithTitle = queryWithTitle.replaceAll("/", "convbckslsh");
+        queryWithTitle = queryWithTitle.replaceAll("/", " ");
         URIBuilder builder = new URIBuilder();
-        builder.setScheme("https");
-        builder.setHost("api.mr-dlib.org");
-        builder.setPath("/v1/documents/" + queryWithTitle + "/related_documents");
+        builder.setScheme("http");
+        builder.setHost("127.0.0.1:5000");
+        builder.setPath("/v2/related_items/" + queryWithTitle);
         builder.addParameter("partner_id", "jabref");
         builder.addParameter("app_id", "jabref_desktop");
         builder.addParameter("app_version", VERSION);
