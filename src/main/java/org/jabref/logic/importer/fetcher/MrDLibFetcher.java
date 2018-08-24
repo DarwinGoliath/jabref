@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory;
  */
 public class MrDLibFetcher implements EntryBasedFetcher {
     private static final Logger LOGGER = LoggerFactory.getLogger(MrDLibFetcher.class);
-
     private static final String NAME = "MDL_FETCHER";
     private final String LANGUAGE;
     private final String VERSION;
@@ -49,28 +48,25 @@ public class MrDLibFetcher implements EntryBasedFetcher {
     public List<BibEntry> performSearch(BibEntry entry) throws FetcherException {
         Optional<String> title = entry.getLatexFreeField(FieldName.TITLE);
         if (title.isPresent()) {
-            LOGGER.info("About to make request to server for title: " + title.get());
             String response = makeServerRequest(title.get());
-            LOGGER.info("Response: \n" + response);
             MrDLibImporter importer = new MrDLibImporter();
             ParserResult parserResult = new ParserResult();
             try {
                 if (importer.isRecognizedFormat(response)) {
-                    LOGGER.info("Importing JSON doc.");
                     parserResult = importer.importDatabase(response);
-                    LOGGER.info("JSON doc imported.");
                 } else {
                     // For displaying An ErrorMessage
+                    String error = importer.getResponseErrorMessage(response);
                     BibEntry errorBibEntry = new BibEntry();
                     errorBibEntry.setField("html_representation",
-                            Localization.lang("Error while fetching from %0", "Mr.DLib"));
+                                           Localization.lang(error));
                     BibDatabase errorBibDataBase = new BibDatabase();
                     errorBibDataBase.insertEntry(errorBibEntry);
                     parserResult = new ParserResult(errorBibDataBase);
                 }
             } catch (IOException e) {
                 LOGGER.error(e.getMessage(), e);
-                throw new FetcherException("XML Parser IOException.");
+                throw new FetcherException("JSON Parser IOException.");
             }
             return parserResult.getDatabase().getEntries();
         } else {
@@ -111,7 +107,7 @@ public class MrDLibFetcher implements EntryBasedFetcher {
         queryWithTitle = queryWithTitle.replaceAll("/", " ");
         URIBuilder builder = new URIBuilder();
         builder.setScheme("http");
-        builder.setHost("127.0.0.1:5000");
+        builder.setHost("api-dev.darwingoliath.com");
         builder.setPath("/v2/related_items/" + queryWithTitle);
         builder.addParameter("partner_id", "jabref");
         builder.addParameter("app_id", "jabref_desktop");
@@ -120,6 +116,7 @@ public class MrDLibFetcher implements EntryBasedFetcher {
         URI uri = null;
         try {
             uri = builder.build();
+            LOGGER.trace("Request: " + uri.toString());
             return uri.toString();
         } catch (URISyntaxException e) {
             LOGGER.error(e.getMessage(), e);

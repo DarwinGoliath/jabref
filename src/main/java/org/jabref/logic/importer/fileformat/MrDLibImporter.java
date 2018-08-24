@@ -9,6 +9,8 @@ import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
+
 import org.jabref.logic.importer.Importer;
 import org.jabref.logic.importer.ParserResult;
 import org.jabref.logic.util.StandardFileType;
@@ -16,6 +18,7 @@ import org.jabref.model.database.BibDatabase;
 import org.jabref.model.entry.BibEntry;
 import org.jabref.model.entry.FieldName;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.slf4j.Logger;
@@ -27,21 +30,23 @@ import org.slf4j.LoggerFactory;
  */
 public class MrDLibImporter extends Importer {
 
-    private static final MessageFormat htmlListItemTemplate = new MessageFormat("<a href=''{0}''><font color='#000000' size='4' face='Arial, Helvetica, sans-serif'>{1}</font></a>. <font color='#000000' size='4' face='Arial, Helvetica, sans-serif'>{2} <i>{3}</i>. {4}</font>");
+    private static final MessageFormat HTML_LIST_ITEM_TEMPLATE = new MessageFormat("<a href=''{0}''><font color='#000000' size='4' face='Arial, Helvetica, sans-serif'>{1}</font></a>. <font color='#000000' size='4' face='Arial, Helvetica, sans-serif'>{2} <i>{3}</i> {4}</font>");
+    private static final String DEFAULT_MRDLIB_ERROR_MESSAGE = "Error while fetching from Mr.DLib.";
     private static final Logger LOGGER = LoggerFactory.getLogger(MrDLibImporter.class);
     public ParserResult parserResult;
 
     @SuppressWarnings("unused")
     @Override
     public boolean isRecognizedFormat(BufferedReader input) throws IOException {
-        LOGGER.info("Checking for recognised format.");
         String recommendationsAsString = convertToString(input);
         try {
-            new JSONObject(recommendationsAsString);
+            JSONObject jsonObject = new JSONObject(recommendationsAsString);
+            if (!jsonObject.has("recommendations")) {
+                return false;
+            }
         } catch (JSONException ex) {
             return false;
         }
-        LOGGER.info("Valid format confirmed.");
         return true;
     }
 
@@ -58,12 +63,12 @@ public class MrDLibImporter extends Importer {
 
     @Override
     public StandardFileType getFileType() {
-        return StandardFileType.XML;
+        return StandardFileType.JSON;
     }
 
     @Override
     public String getDescription() {
-        return "Takes valid xml documents. Parses from MrDLib API a BibEntry";
+        return "Takes valid JSON documents from the Mr. DLib API and parses them into a BibEntry";
     }
 
     /**
@@ -101,7 +106,7 @@ public class MrDLibImporter extends Importer {
 
     /**
      * Parses the input from the server to a ParserResult
-     * @param input A BufferedReader with a reference to a string with the servers response
+     * @param input A BufferedReader with a reference to a string with the server's response
      * @throws IOException
      */
     private void parse(BufferedReader input) throws IOException {
@@ -109,22 +114,23 @@ public class MrDLibImporter extends Importer {
         BibDatabase bibDatabase = new BibDatabase();
         // The document to parse
         String recommendations = convertToString(input);
-
         // The sorted BibEntries gets stored here later
-        List<BibEntry> bibEntries = new ArrayList<>();
+        List<RankedBibEntry> rankedBibEntries = new ArrayList<>();
 
+        // Get recommendations from response and populate bib entries
         JSONObject recommendationsJson = new JSONObject(recommendations);
         recommendationsJson = recommendationsJson.getJSONObject("recommendations");
-        LOGGER.info("Recommendations: " + recommendationsJson);
         Iterator<String> keys = recommendationsJson.keys();
         while (keys.hasNext()) {
             String key = keys.next();
-            LOGGER.info("Starting on key: " + key);
             JSONObject value = recommendationsJson.getJSONObject(key);
-            LOGGER.info("Recommendation: \n" + value);
-            BibEntry currentEntry = populateBibEntry(value);
-            bibEntries.add(currentEntry);
+            rankedBibEntries.add(populateBibEntry(value));
         }
+
+        // Sort bib entries according to rank
+        rankedBibEntries.sort((RankedBibEntry rankedBibEntry1,
+                RankedBibEntry rankedBibEntry2) -> rankedBibEntry1.rank.compareTo(rankedBibEntry2.rank));
+        List<BibEntry> bibEntries = rankedBibEntries.stream().map(e -> e.entry).collect(Collectors.toList());
 
         for (BibEntry bibentry : bibEntries) {
             bibDatabase.insertEntry(bibentry);
@@ -132,44 +138,87 @@ public class MrDLibImporter extends Importer {
         parserResult = new ParserResult(bibDatabase);
     }
 
-    private BibEntry populateBibEntry(JSONObject recommendation) {
+    /**
+     * Parses the JSON recommendations into bib entries
+     * @param recommendation JSON object of a single recommendation returned by Mr. DLib
+     * @return A ranked bib entry created from the recommendation input
+     */
+    private RankedBibEntry populateBibEntry(JSONObject recommendation) {
         BibEntry current = new BibEntry();
-        LOGGER.info("Starting gethering info.");
         String authors = "", title = "", year = "", journal = "", url = "";
+        Integer rank = 100;
+
+        // parse each of the relevant fields into variables
         if (recommendation.has("authors") && !recommendation.isNull("authors")) {
-            authors = recommendation.getJSONArray("authors").toString();
+            authors = getAuthorsString(recommendation);
         }
-        LOGGER.info("Authors done");
         if (recommendation.has("title") && !recommendation.isNull("title")) {
             title = recommendation.getString("title");
         }
-        LOGGER.info("Title done");
         if (recommendation.has("date_published") && !recommendation.isNull("date_published")) {
             year = recommendation.getString("date_published");
         }
-        LOGGER.info("Year done");
         if (recommendation.has("published_in") && !recommendation.isNull("published_in")) {
             journal = recommendation.getString("published_in");
         }
-        LOGGER.info("Journal done");
         if (recommendation.has("url") && !recommendation.isNull("url")) {
-            url = recommendation.getString("url");
+            url = recommendation.getString("url") + ".";
         }
-        LOGGER.info("URL done");
+        if (recommendation.has("recommendation_id") && !recommendation.isNull("recommendation_id")) {
+            rank = recommendation.getInt("recommendation_id");
+        }
 
+        // Populate bib entry with relevant data
         current.setField(FieldName.AUTHOR, authors);
         current.setField(FieldName.TITLE, title);
         current.setField(FieldName.YEAR, year);
         current.setField(FieldName.JOURNAL, journal);
 
+        // Create HTML representation of recommendation for display on the UI
         Object[] args = {url, title, authors, journal, year};
-        String htmlRepresentation = htmlListItemTemplate.format(args);
-        LOGGER.info("HTML: \n" + htmlRepresentation);
+        String htmlRepresentation = HTML_LIST_ITEM_TEMPLATE.format(args);
         current.setField("html_representation", htmlRepresentation);
-        return current;
+
+        return new RankedBibEntry(current, rank);
+    }
+
+    /**
+     * Creates an authors string from a JSON recommendation
+     * @param recommendation JSON Object recommendation from Mr. DLib
+     * @return A string of all authors, separated by commas and finished with a full stop.
+     */
+    private String getAuthorsString(JSONObject recommendation) {
+        String authorsString = "";
+        JSONArray array = recommendation.getJSONArray("authors");
+        for (int i = 0; i < array.length(); ++i) {
+            authorsString += array.getString(i) + ", ";
+        }
+        int stringLength = authorsString.length();
+        if (stringLength > 2) {
+            authorsString = authorsString.substring(0, stringLength - 2) + ".";
+        }
+        return authorsString;
     }
 
     public ParserResult getParserResult() {
         return parserResult;
+    }
+
+    /**
+     * Gets the error message to be returned if there has been an error in returning recommendations.
+     * Returns default error message if there is no message from Mr. DLib.
+     * @param response The response from the MDL server as a string.
+     * @return String error message to be shown to the user.
+     */
+    public String getResponseErrorMessage(String response) {
+        try {
+            JSONObject jsonObject = new JSONObject(response);
+            if (!jsonObject.has("message")) {
+                return jsonObject.getString("message");
+            }
+        } catch (JSONException ex) {
+            return DEFAULT_MRDLIB_ERROR_MESSAGE;
+        }
+        return DEFAULT_MRDLIB_ERROR_MESSAGE;
     }
 }
